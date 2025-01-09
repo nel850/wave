@@ -8,6 +8,8 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\Recipient;
 use App\Models\User;
+use App\Notifications\IncomingMessageNotification;
+use App\Notifications\MessageReceived;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
@@ -219,7 +221,7 @@ private function processMessage(array $message, ?array $contact, ?string $phone_
         }
 
         // Create the message
-        Message::create([
+        $newMessage = Message::create([
             'conversation_id' => $conversation->id,
             'sender_id' => $senderId,
             'receiver_id' => $recipient->id,
@@ -229,10 +231,23 @@ private function processMessage(array $message, ?array $contact, ?string $phone_
             'sent_at' => Carbon::createFromTimestamp($timestamp)
         ]);
 
-        Log::info('Message processed successfully', [
-            'from' => $from,
-            'message_id' => $messageId
-        ]);
+        $user = User::find($senderId);
+
+            //send the notification
+            if ($user) {
+                Log::info('Sending notification to user', ['user_id' => $user->id]);
+
+                $user->notify(new MessageReceived($newMessage, $conversation->id));
+
+                Log::info('Notification sent successfully', ['user_id' => $user->id]);
+            }else {
+                Log::warning('User not found for senderId', ['sender_id' => $senderId]);
+            }
+
+        // Log::info('Message processed successfully', [
+        //     'from' => $from,
+        //     'message_id' => $messageId
+        // ]);
     });
 }
 

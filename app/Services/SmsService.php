@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\Recipient;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Notifications\MessageReceived;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -29,44 +30,48 @@ class SmsService
     /**
      * Sends an SMS message via Infobip.
      */
-    public function sendMessage(string $recipientPhone, string $messageBody)
-    {
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => "App {$this->apiKey}",
-                'Content-Type' => 'application/json',
-            ])->post("{$this->apiBaseUrl}/sms/2/text/single", [
-                'from' => $this->senderId,
-                'to' => $this->formatPhoneNumber($recipientPhone),
-                'text' => $messageBody,
-            ]);
 
-            if ($response->successful()) {
-                $messageId = $response->json('messages.0.id');
-                return ['success' => true, 'message_id' => $messageId];
-            }
 
-            Log::error('Failed to send SMS via Infobip', [
-                'response' => $response->json(),
-                'recipient' => $recipientPhone,
-            ]);
+        public function sendMessage(string $recipientPhone, string $messageBody)
+        {
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => "App {$this->apiKey}",
+                    'Content-Type' => 'application/json',
+                ])->post("{$this->apiBaseUrl}/sms/2/text/single", [
+                    'from' => $this->senderId,
+                    'to' => $this->formatPhoneNumber($recipientPhone),
+                    'text' => $messageBody,
+                ]);
 
-            return [
-                'success' => false,
-                'error' => $response->json(),
-            ];
-        } catch (\Exception $e) {
-            Log::error('SMS send exception via Infobip', [
-                'error' => $e->getMessage(),
-                'recipient' => $recipientPhone,
-            ]);
-
-            return [
-                'success' => false,
-                'error' => $e->getMessage(),
-            ];
+        if ($response->successful()) {
+            $messageId = $response->json('messages.0.id');
+            return ['success' => true, 'message_id' => $messageId];
         }
+
+        Log::error('Failed to send SMS via Infobip', [
+            'response' => $response->json(),
+            'recipient' => $recipientPhone,
+        ]);
+
+        return [
+            'success' => false,
+            'error' => $response->json(),
+        ];
+    } catch (\Exception $e) {
+        Log::error('SMS send exception via Infobip', [
+            'error' => $e->getMessage(),
+            'recipient' => $recipientPhone,
+        ]);
+
+        return [
+            'success' => false,
+            'error' => $e->getMessage(),
+        ];
     }
+    }
+
+
 
     /**
      * Handles incoming SMS webhook notifications from Infobip.
@@ -132,7 +137,7 @@ class SmsService
             );
 
             // Create the message within the conversation
-            Message::create([
+            $newMessage = Message::create([
                 'conversation_id' => $conversation->id,
                 'sender_id' => $senderId,
                 'receiver_id' => $recipient->id,
@@ -140,6 +145,19 @@ class SmsService
                 'status' => 'received',
                 'sent_at' => $timestamp, // Use timestamp from payload or default to now
             ]);
+
+            $user = User::find($senderId);
+
+            //send the notification
+            if ($user) {
+                Log::info('Sending notification to user', ['user_id' => $user->id]);
+
+                $user->notify(new MessageReceived($newMessage, $conversation->id));
+
+                Log::info('Notification sent successfully', ['user_id' => $user->id]);
+            }else {
+                Log::warning('User not found for senderId', ['sender_id' => $senderId]);
+            }
         });
     }
 

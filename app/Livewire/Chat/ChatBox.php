@@ -21,6 +21,8 @@ class ChatBox extends Component
     protected $whatsAppService;
     protected $smsService;
 
+
+
     public function boot(WhatsAppService $whatsAppService ,SmsService $smsService)
     {
         $this->whatsAppService = $whatsAppService;
@@ -28,10 +30,85 @@ class ChatBox extends Component
     }
 
 
+
     public function mount()
+{
+    Log::info('ChatBox mounted', [
+        'user_id' => Auth::id(),
+        'conversation_id' => optional($this->selectedConversation)->id
+    ]);
+    $this->loadMessages();
+}
+
+
+
+protected $listeners = [
+    'loadedMessages' => '$refresh'
+];
+
+// Updated getListeners to include both broadcast and custom events
+public function getListeners()
     {
-        $this->loadMessages();
+        if (!$this->selectedConversation) {
+            return [];
+        }
+
+        $channelName = "chatbox.{$this->selectedConversation->id}";
+        return [
+            "{$channelName},.App\\Notifications\\MessageReceived" => 'handleBroadcastedNotification',
+            'newMessage' => '$refresh'
+        ];
     }
+
+    public function handleBroadcastedNotification($event)
+{
+
+
+    Log::info('Handling broadcasted notification in Livewire', [
+        'notification' => $event,
+        'conversation_id' => optional($this->selectedConversation)->id
+    ]);
+
+    // Check if we have the required data
+    if (!isset($notification['message']) || !isset($notification['message']['conversation_id'])) {
+        Log::error('Invalid notification format', ['notification' => $event]);
+        return;
+    }
+
+    // Verify this is for the current conversation
+    if ($event['message']['conversation_id'] !== $this->selectedConversation->id) {
+        Log::info('Notification is for different conversation');
+        return;
+    }
+
+    try {
+        // Create new message instance
+        $newMessage = new Message([
+            'id' => $notification['message']['id'],
+            'conversation_id' => $notification['message']['conversation_id'],
+            'body' => $notification['message']['body'],
+            'sender_id' => $notification['message']['sender_id'],
+            'receiver_id' => $notification['message']['receiver_id'],
+            'status' => $notification['message']['status'],
+            'created_at' => $notification['message']['created_at']
+        ]);
+
+        // Add to collection
+        $this->loadedMessages->push($newMessage);
+
+        Log::info('Added new message to conversation', ['message_id' => $newMessage->id]);
+
+        // Force a re-render
+        $this->dispatch('newMessage');
+        $this->dispatch('scroll-bottom');
+    } catch (\Exception $e) {
+        Log::error('Error handling notification', [
+            'error' => $e->getMessage(),
+            'notification' => $event
+        ]);
+    }
+}
+
 
     public function sendMessage()
     {
@@ -58,6 +135,7 @@ class ChatBox extends Component
 
         // Push the message
         $this->loadedMessages->push($createdMessage);
+
     }
 
 
@@ -108,28 +186,11 @@ class ChatBox extends Component
     protected function loadMessages()
     {
         if ($this->selectedConversation) {
-
-            Log::info('Loading messages', [
-                'conversation_id' => $this->selectedConversation->id,
-            'current_user_id' => Auth::user()->id
-
-            ]);
-
             $this->loadedMessages = Message::where('conversation_id', $this->selectedConversation->id)
-                ->where(function ($query) {
-                    $query->where('sender_id', Auth::user()->id)
-                          ->orWhere('receiver_id');
-                })
-
-
                 ->orderBy('created_at', 'asc')
                 ->get();
-
-                // Log::info('Loaded messages count', [
-                //     'count' => $this->loadedMessages->count()
-                // ]);
         } else {
-            $this->loadedMessages = collect(); // Empty collection if no conversation is selected
+            $this->loadedMessages = collect();
         }
     }
 

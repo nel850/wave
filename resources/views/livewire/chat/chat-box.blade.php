@@ -1,11 +1,21 @@
 <div
-  x-data="{ height: 0, conversationElement: document.getElementById('conversation') }"
-  x-init="
-    height = conversationElement.scrollHeight;
-    $nextTick(() => conversationElement.scrollTop = height);
-  "
-  @scroll-bottom.window="$nextTick(() => conversationElement.scrollTop = height)"
-  class="w-full overflow-hidden"
+    x-data="{
+        height: 0,
+        conversationElement: null,
+        init() {
+            this.conversationElement = document.getElementById('conversation');
+            this.scrollToBottom();
+            this.$watch('$wire.loadedMessages', () => this.scrollToBottom());
+        },
+        scrollToBottom() {
+            if (this.conversationElement) {
+                this.height = this.conversationElement.scrollHeight;
+                this.conversationElement.scrollTop = this.height;
+            }
+        }
+    }"
+    @scroll-bottom.window="scrollToBottom"
+    class="w-full overflow-hidden"
 >
   <div class="border-b flex flex-col overflow-y-scroll grow h-full">
     <!-- Header -->
@@ -105,4 +115,45 @@
       </div>
     </footer>
   </div>
+
+  @push('scripts')
+    <script>
+        document.addEventListener('livewire:initialized', () => {
+            console.log('Livewire initialized');
+
+            // Debug Pusher connection
+            window.Echo.connector.pusher.connection.bind('connected', () => {
+                console.log('Connected to Pusher');
+            });
+
+            window.Echo.connector.pusher.connection.bind('error', (error) => {
+                console.error('Pusher connection error:', error);
+            });
+
+            // Subscribe to the channel
+            const conversationId = @json($this->selectedConversation->id);
+            const channel = `chatbox.${conversationId}`;
+
+            console.log('Subscribing to channel:', channel);
+
+            window.Echo.channel(channel)
+                .listen('.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', (notification) => {
+                    console.log('Received notification in browser:', notification);
+                    @this.call('handleBroadcastedNotification', notification);
+                })
+                .error((error) => {
+                    console.error('Channel subscription error:', error);
+                });
+        });
+
+        // Handle scroll events
+        document.addEventListener('scroll-bottom', () => {
+            console.log('Scroll bottom event received');
+            const conversationElement = document.getElementById('conversation');
+            if (conversationElement) {
+                conversationElement.scrollTop = conversationElement.scrollHeight;
+            }
+        });
+    </script>
+    @endpush
 </div>

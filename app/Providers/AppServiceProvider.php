@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use Illuminate\Broadcasting\BroadcastServiceProvider;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\ServiceProvider;
 
@@ -21,5 +22,6 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         VerifyCsrfToken::except(['/webhooks', '/sms/receive']);
+        BroadcastServiceProvider::class;
     }
 }
